@@ -4,79 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!--HOSTED_START-->
-<title>Inventory Audit Formatter</title>
+<title>Audit Report Formatter</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <script>
 /* =====================================================================
-   INVENTORY AUDIT REPORT FORMATTER
-   Turns one raw PawnMate physical-inventory export (.xls) into one
-   print-ready audit workbook (.xlsx) with four tabs.
-   Runs fully offline; no data leaves this computer.
+   AUDIT REPORT FORMATTER
+   Turns one raw PawnMate count export (inventory_count_###.xls) into one
+   print-ready audit workbook (.xlsx). Three audits: Inventory, Pawn and
+   Layaway. Runs fully offline; no data leaves this computer.
 
-   ALL REPORT RULES LIVE IN CONFIG BELOW. To change a column, heading,
-   width, format, colour or page-header text, edit CONFIG only.
+   ALL REPORT RULES LIVE IN THE CONFIG BLOCKS BELOW:
+     SHARED   stores, Excel styling, print setup (used by every audit)
+     COLUMNS  every column any report can use (heading, width, format)
+     FLAGS    automatic row notes (e.g. "Scanned twice - found")
+     AUDITS   one block per audit: source tabs, columns, output tabs
+   To change one audit, edit only its block in AUDITS.
    ===================================================================== */
-const APP = { name: 'Inventory Audit Report Formatter', version: '1.2.0' };
+const APP = { name: 'Audit Report Formatter', version: '2.0.0' };
 
-const CONFIG = {
+const SHARED = {
   stores: ['BBP1', 'BBP2', 'BBP3', 'BBP4'],
-
-  // Output file name. {store} = BBP1..BBP4, {date} = count date as mm-dd-yy
-  fileName: '{store} INV AUDIT {date}.xlsx',
-
-  // Rows whose Category 1 equals this (trimmed, any case) go to Commissary.
-  // Everything else, including a blank Category 1, goes to Regular.
-  commissaryCategory: 'Commissary',
-
-  // Source tabs in the PawnMate export. Found by tab NAME and header TEXT,
-  // never by position.
-  sources: {
-    disc: {
-      tab: 'Inventory Discrepancy',
-      dedupe: true,                 // keep first row per Scanned ID
-      dateHeader: 'Date',           // used to find the count date
-      required: ['Scanned ID', 'Description', 'Location', 'Selling Price', 'System Quantity',
-                 'Physical Quantity', 'Difference', 'Cost Of Goods', 'Category 1'],
-    },
-    miss: {
-      tab: 'In System But Not In Physical',
-      dedupe: false,
-      required: ['Scanned ID', 'Description', 'Location', 'Selling Price', 'System Quantity',
-                 'Physical Quantity', 'Difference', 'Cost Of Goods', 'Category 1', 'Inventory Age'],
-    },
-  },
-  // Fallback source for the count date if the Discrepancy tab has no dates.
-  dateFallbackTab: 'Physical Inventory',
-
-  // The four output tabs, in workbook order.
-  // Printed page title = "{store} " + title, e.g. "BBP3 COMMISSARY MISSING INVENTORY"
-  reports: [
-    { key: 'regDisc', sheet: 'Reg Discrepancy', source: 'disc', commissary: false, title: 'REGULAR INVENTORY DISCREPANCY' },
-    { key: 'regMiss', sheet: 'Reg Missing',     source: 'miss', commissary: false, title: 'REGULAR MISSING INVENTORY' },
-    { key: 'comDisc', sheet: 'Com Discrepancy', source: 'disc', commissary: true,  title: 'COMMISSARY INVENTORY DISCREPANCY' },
-    { key: 'comMiss', sheet: 'Com Missing',     source: 'miss', commissary: true,  title: 'COMMISSARY MISSING INVENTORY' },
-  ],
-
-  // Output columns, left to right.
-  //   src      = PawnMate header text the value comes from
-  //   type     = id | text | num | excog | blank
-  //   only     = 'miss' or 'disc' to limit a column to one kind of tab
-  columns: [
-    { key: 'id',    head: 'Scanned ID',  src: 'Scanned ID',        width: 12, type: 'id',    numFmt: '0' },
-    { key: 'desc',  head: 'Description', src: 'Description',       width: 50, type: 'text',  wrap: true },
-    { key: 'loc',   head: 'Loc',         src: 'Location',          width: 8,  type: 'text' },
-    { key: 'price', head: 'Price',       src: 'Selling Price',     width: 8,  type: 'num',   numFmt: '0.00' },
-    { key: 'sys',   head: 'Sys Qty',     src: 'System Quantity',   width: 6,  type: 'num',   numFmt: '0' },
-    { key: 'phy',   head: 'Phy Qty',     src: 'Physical Quantity', width: 6,  type: 'num',   numFmt: '0' },
-    { key: 'diff',  head: 'Diff',        src: 'Difference',        width: 6,  type: 'num',   numFmt: '0' },
-    { key: 'cog',   head: 'COG',         src: 'Cost Of Goods',     width: 8,  type: 'num',   numFmt: '0.00' },
-    { key: 'excog', head: 'ExCOG',                                 width: 10, type: 'excog', numFmt: '0.00;[Red]-0.00' },
-    { key: 'age',   head: 'Age',         src: 'Inventory Age',     width: 6,  type: 'num',   numFmt: '0', only: 'miss' },
-    { key: 'found', head: 'Found ✓',                          width: 7,  type: 'blank', align: 'center' },
-    { key: 'notes', head: 'Notes',                                 width: 18, type: 'blank', wrap: true },
-  ],
-  // ExCOG formula; {diff} and {cog} become that row's cell addresses.
-  excogFormula: 'ROUND({diff}*{cog},2)',
 
   style: {
     font: { name: 'Arial', size: 10 },
@@ -91,12 +38,16 @@ const CONFIG = {
     // whose font has no colour in black, not in the table style's colour.
     // Use 'FFFFFF' for styles with a dark header, '000000' for a light one.
     headerFontColor: 'FFFFFF',
-    headerHeight: 27,          // pt (room for two-line headings like "Sys Qty")
+    // Header fill, painted on the cells too (same black as Medium 1's header), so the
+    // header still shows in Google Sheets / LibreOffice, which ignore Excel table styles.
+    headerFill: '000000',
+    headerHeight: 27,           // pt (room for two-line headings like "Sys Qty")
     minRowHeight: 18,           // pt (room to write in Found / Notes)
     lineHeight: 12.75,          // pt per wrapped line of Arial 10
     charsPerWidthUnit: 1.0,     // used to estimate wrapped lines (conservative)
     negSysFill: 'FFF2CC',       // light yellow: negative System Qty row
     zeroCostFill: 'FCE4D6',     // light orange: $0 / blank cost cell (gray would vanish in the banding)
+    noteFontColor: '404040',    // automatic notes (FLAGS) are written in dark gray italics
     emptyText: 'No items in this report.',
   },
 
@@ -118,6 +69,154 @@ const CONFIG = {
     footerCenter: 'Page &P of &N',
   },
 };
+
+// Every column a report can use. An audit lists the keys it wants, in order,
+// and may override a field for itself: ['desc', { width: 46 }].
+//   src  = PawnMate header text the value comes from
+//   calc = worked out by the app instead (ticketType, daysHeld)
+//   type = id | text | num | date | excog | blank
+const COLUMNS = {
+  ticket: { head: 'Ticket #',    src: 'Ticket ID',         width: 10, type: 'text' },
+  ttype:  { head: 'Type',        calc: 'ticketType',       width: 5,  type: 'text' },
+  id:     { head: 'Scanned ID',  src: 'Scanned ID',        width: 12, type: 'id',    numFmt: '0' },
+  desc:   { head: 'Description', src: 'Description',       width: 50, type: 'text',  wrap: true },
+  loc:    { head: 'Loc',         src: 'Location',          width: 8,  type: 'text' },
+  price:  { head: 'Price',       src: 'Selling Price',     width: 8,  type: 'num',   numFmt: '0.00' },
+  sys:    { head: 'Sys Qty',     src: 'System Quantity',   width: 6,  type: 'num',   numFmt: '0' },
+  phy:    { head: 'Phy Qty',     src: 'Physical Quantity', width: 6,  type: 'num',   numFmt: '0' },
+  diff:   { head: 'Diff',        src: 'Difference',        width: 6,  type: 'num',   numFmt: '0' },
+  cog:    { head: 'COG',         src: 'Cost Of Goods',     width: 8,  type: 'num',   numFmt: '0.00' },
+  excog:  { head: 'ExCOG',                                 width: 10, type: 'excog', numFmt: '0.00;[Red]-0.00' },
+  age:    { head: 'Age',         src: 'Inventory Age',     width: 6,  type: 'num',   numFmt: '0' },
+  tdate:  { head: 'Ticket Date', src: 'Ticket Date',       width: 9,  type: 'date',  numFmt: 'mm/dd/yy' },
+  days:   { head: 'Days Held',   calc: 'daysHeld',         width: 6,  type: 'num',   numFmt: '0' },
+  found:  { head: 'Found ✓',                          width: 7,  type: 'blank', align: 'center' },
+  notes:  { head: 'Notes',                                 width: 18, type: 'blank', wrap: true },
+};
+// ExCOG formula; {diff} and {cog} become that row's cell addresses.
+const EXCOG_FORMULA = 'ROUND({diff}*{cog},2)';
+
+// Automatic row notes. An audit turns one on by listing its key in `flags`.
+// A flagged row gets the note in its Notes cell; with excludeFromTotals it is
+// also left out of the on-screen totals and sorted to the bottom of its tab.
+const FLAGS = {
+  doubleScan: {
+    sources: ['disc'], note: 'Scanned twice - found', excludeFromTotals: true,
+    // More found than the system has, and every extra unit is the same tag scanned again.
+    test: r => (r.diff || 0) > 0 && r._scans > 1 && r._scans >= (r.phy || 0),
+    warn: n => `${n} item${n === 1 ? ' shows' : 's show'} more found than the system has only because the same tag was scanned more than once. Noted "Scanned twice - found" and left out of the totals.`,
+  },
+  countDay: {
+    sources: ['miss'], note: 'Taken in on count day', excludeFromTotals: false,
+    test: (r, ctx) => r._tdateMs != null && ctx.countMs != null && r._tdateMs >= ctx.countMs,
+    warn: n => `${n} missing item${n === 1 ? ' was' : 's were'} taken in on the count day and may not have been put away before the scan. Noted "Taken in on count day".`,
+  },
+  storeWide: {
+    sources: ['disc'], note: 'Sys Qty is store-wide', excludeFromTotals: true,
+    // PawnMate marks multi-unit stock items this way; their System Qty is the whole store's.
+    test: r => norm(r._state) === 'n/a multiples found',
+    warn: n => `${n} multi-unit stock item${n === 1 ? '' : 's'} (Inventory State "N/A Multiples Found") compare the shelf with the whole store's quantity, so the Diff isn't a real shortage. Noted "Sys Qty is store-wide" and left out of the totals.`,
+  },
+};
+
+const AUDITS = {
+  inventory: {
+    label: 'Inventory Audit',
+    blurb: 'Sales-floor count compared with sellable inventory, split into Regular and Commissary.',
+    fileHint: 'the inventory count export',
+    // How the export says what it was counted against (first line of its
+    // "In Physical But Not In System" tab). Used to catch the wrong file.
+    detect: /sellable/i,
+    fileName: '{store} INV AUDIT {date}.xlsx',
+    // Rows whose Category 1 equals this (trimmed, any case) go to the Commissary
+    // reports; everything else, including a blank Category 1, goes to Regular.
+    splitCategory: 'Commissary',
+    sources: {
+      disc: { tab: 'Inventory Discrepancy', dedupe: true,
+              required: ['Scanned ID', 'Description', 'Location', 'Selling Price', 'System Quantity',
+                         'Physical Quantity', 'Difference', 'Cost Of Goods', 'Category 1'] },
+      miss: { tab: 'In System But Not In Physical',
+              required: ['Scanned ID', 'Description', 'Location', 'Selling Price', 'System Quantity',
+                         'Physical Quantity', 'Difference', 'Cost Of Goods', 'Category 1', 'Inventory Age'] },
+    },
+    columns: {
+      disc: ['id', 'desc', 'loc', 'price', 'sys', 'phy', 'diff', 'cog', 'excog', 'found', 'notes'],
+      miss: ['id', 'desc', 'loc', 'price', 'sys', 'phy', 'diff', 'cog', 'excog', 'age', 'found', 'notes'],
+    },
+    // Output tabs in workbook order. Printed page title = "{store} " + title.
+    reports: [
+      { key: 'regDisc', sheet: 'Reg Discrepancy', source: 'disc', split: 'other', title: 'REGULAR INVENTORY DISCREPANCY' },
+      { key: 'regMiss', sheet: 'Reg Missing',     source: 'miss', split: 'other', title: 'REGULAR MISSING INVENTORY' },
+      { key: 'comDisc', sheet: 'Com Discrepancy', source: 'disc', split: 'match', title: 'COMMISSARY INVENTORY DISCREPANCY' },
+      { key: 'comMiss', sheet: 'Com Missing',     source: 'miss', split: 'match', title: 'COMMISSARY MISSING INVENTORY' },
+    ],
+    flags: [],
+  },
+
+  pawn: {
+    label: 'Pawn Audit',
+    blurb: 'Pawn storage count compared with open pawns and buys.',
+    fileHint: 'the pawn count export',
+    detect: /pawn/i,
+    fileName: '{store} PAWN AUDIT {date}.xlsx',
+    sources: {
+      miss:  { tab: 'In System But Not In Physical',
+               required: ['Scanned ID', 'Description', 'Ticket ID', 'Location', 'System Quantity',
+                          'Physical Quantity', 'Difference', 'Cost Of Goods', 'Ticket Date'] },
+      disc:  { tab: 'Inventory Discrepancy', dedupe: true,
+               required: ['Scanned ID', 'Description', 'Ticket ID', 'Location', 'System Quantity',
+                          'Physical Quantity', 'Difference', 'Cost Of Goods', 'Ticket Date'] },
+      extra: { tab: 'In Physical But Not In System', dedupe: true,
+               required: ['Scanned ID', 'Description', 'Location', 'Cost Of Goods', 'Ticket Date'] },
+    },
+    columns: {
+      miss:  ['ticket', 'ttype', ['id', { width: 10 }], ['desc', { width: 40 }], 'loc', 'sys', 'phy', 'diff', 'cog', 'excog', 'tdate', 'days', 'found', 'notes'],
+      disc:  ['ticket', 'ttype', ['id', { width: 10 }], ['desc', { width: 40 }], 'loc', 'sys', 'phy', 'diff', 'cog', 'excog', 'tdate', 'days', 'found', 'notes'],
+      extra: ['id', ['desc', { width: 60 }], 'loc', 'cog', 'tdate', 'days', 'found', ['notes', { width: 30 }]],
+    },
+    reports: [
+      { key: 'miss',  sheet: 'Pawn Missing',     source: 'miss',  title: 'PAWN MISSING - OPEN PAWNS AND BUYS NOT FOUND' },
+      { key: 'disc',  sheet: 'Pawn Discrepancy', source: 'disc',  title: 'PAWN QUANTITY DISCREPANCY' },
+      { key: 'extra', sheet: 'Not On Pawn',      source: 'extra', title: 'FOUND IN PAWN STORAGE - NOT ON AN OPEN PAWN OR BUY', sort: 'cost', totals: 'cost' },
+    ],
+    flags: ['doubleScan', 'countDay'],
+  },
+
+  layaway: {
+    label: 'Layaway Audit',
+    blurb: 'Layaway shelf count compared with open layaways.',
+    fileHint: 'the layaway count export',
+    detect: /layaway/i,
+    fileName: '{store} LAYAWAY AUDIT {date}.xlsx',
+    sources: {
+      miss:  { tab: 'In System But Not In Physical',
+               required: ['Scanned ID', 'Description', 'Ticket ID', 'Location', 'Selling Price', 'System Quantity',
+                          'Physical Quantity', 'Difference', 'Cost Of Goods'] },
+      disc:  { tab: 'Inventory Discrepancy', dedupe: true,
+               required: ['Scanned ID', 'Description', 'Ticket ID', 'Location', 'Selling Price', 'System Quantity',
+                          'Physical Quantity', 'Difference', 'Cost Of Goods'] },
+      extra: { tab: 'In Physical But Not In System', dedupe: true,
+               required: ['Scanned ID', 'Description', 'Location', 'Cost Of Goods'] },
+    },
+    columns: {
+      // No Ticket Date / Days Held here: on a layaway export, Ticket Date is when the
+      // store first took the item in, not when the layaway started.
+      miss:  ['ticket', ['id', { width: 10 }], 'desc', 'loc', 'price', 'sys', 'phy', 'diff', 'cog', 'excog', 'found', 'notes'],
+      disc:  ['ticket', ['id', { width: 10 }], 'desc', 'loc', 'price', 'sys', 'phy', 'diff', 'cog', 'excog', 'found', 'notes'],
+      extra: ['id', ['desc', { width: 70 }], 'loc', 'cog', 'found', ['notes', { width: 30 }]],
+    },
+    reports: [
+      { key: 'miss',  sheet: 'Layaway Missing',     source: 'miss',  title: 'LAYAWAY MISSING - OPEN LAYAWAYS NOT FOUND' },
+      { key: 'disc',  sheet: 'Layaway Discrepancy', source: 'disc',  title: 'LAYAWAY QUANTITY DISCREPANCY' },
+      { key: 'extra', sheet: 'Not On Layaway',      source: 'extra', title: 'FOUND ON LAYAWAY SHELF - NOT ON AN OPEN LAYAWAY', sort: 'cost', totals: 'cost' },
+    ],
+    flags: ['doubleScan', 'storeWide'],
+  },
+};
+// Fallback source for the count date if the Discrepancy tab has no dates.
+const DATE_FALLBACK_TAB = 'Physical Inventory';
+// The tab whose first line says what the count was compared against.
+const DETECT_TAB = 'In Physical But Not In System';
 /* ===================== end of CONFIG ===================== */
 
 /* ---------- helpers ---------- */
@@ -142,6 +241,7 @@ const pad = n => String(n).padStart(2, '0');
 const money = n => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const hfEsc = s => String(s).replace(/&/g, '&&');           // literal & in Excel header/footer
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function colLetter(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
 const storage = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -149,6 +249,33 @@ const storage = {
 };
 
 class UserError extends Error {}
+
+// Resolved column list for one source of one audit.
+function columnsFor(audit, source) {
+  return audit.columns[source].map(entry => {
+    const [key, over] = Array.isArray(entry) ? entry : [entry, {}];
+    return { key, ...COLUMNS[key], ...over };
+  });
+}
+
+/* ---------- dates ---------- */
+// "mm/dd/yyyy" (or an Excel serial) -> "mm/dd/yyyy" text, or null.
+function datePart(v) {
+  if (typeof v === 'number') {
+    const d = XLSX.SSF.parse_date_code(v);
+    return d ? `${pad(d.m)}/${pad(d.d)}/${d.y}` : null;
+  }
+  const m = String(v || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m) return null;
+  const y = m[3].length === 2 ? '20' + m[3] : m[3];
+  return `${pad(m[1])}/${pad(m[2])}/${y}`;
+}
+// "mm/dd/yyyy" -> UTC midnight in ms (UTC so Excel gets the same calendar day).
+function dateMs(text) {
+  if (!text) return null;
+  const [m, d, y] = text.split('/').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
 
 /* ---------- reading the PawnMate export ---------- */
 function findSheet(wb, name) {
@@ -160,7 +287,7 @@ function findSheet(wb, name) {
 // Returns { headers: {normHeader: colIndex}, rows: [array,...] }
 function readTable(wb, tabName, required) {
   const ws = findSheet(wb, tabName);
-  if (!ws) throw new UserError(`This file has no tab named "${tabName}". Make sure it is the PawnMate physical-inventory export (inventory_count_###.xls).`);
+  if (!ws) throw new UserError(`This file has no tab named "${tabName}". Make sure it is the PawnMate count export (inventory_count_###.xls).`);
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
   // Header row: first row (within the top 15) that holds every required heading.
   let hRow = -1;
@@ -184,61 +311,83 @@ function readTable(wb, tabName, required) {
   return { headers, rows };
 }
 
-function datePart(v) {
-  if (typeof v === 'number') {               // Excel serial date
-    const d = XLSX.SSF.parse_date_code(v);
-    return d ? `${pad(d.m)}/${pad(d.d)}/${d.y}` : null;
-  }
-  const m = String(v || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (!m) return null;
-  const y = m[3].length === 2 ? '20' + m[3] : m[3];
-  return `${pad(m[1])}/${pad(m[2])}/${y}`;
-}
-
-function findCountDate(wb) {
+function findCountDate(wb, audit) {
   const counts = {};
-  const tally = (tab, hdr) => {
+  const tally = tab => {
     const ws = findSheet(wb, tab); if (!ws) return;
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
     for (let r = 0; r < Math.min(15, aoa.length); r++) {
-      const idx = aoa[r].map(norm).indexOf(norm(hdr));
+      const idx = aoa[r].map(norm).indexOf('date');
       if (idx >= 0) {
         for (const row of aoa.slice(r + 1)) { const d = datePart(row[idx]); if (d) counts[d] = (counts[d] || 0) + 1; }
         return;
       }
     }
   };
-  tally(CONFIG.sources.disc.tab, CONFIG.sources.disc.dateHeader);
-  if (!Object.keys(counts).length) tally(CONFIG.dateFallbackTab, 'Date');
+  tally(audit.sources.disc.tab);
+  if (!Object.keys(counts).length) tally(DATE_FALLBACK_TAB);
   const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
   return best ? best[0] : null;
 }
 
+// Which audit the file is for, from the first line of its "In Physical But Not In System" tab.
+function detectAudit(wb) {
+  const ws = findSheet(wb, DETECT_TAB); if (!ws) return null;
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+  const line = (aoa.slice(0, 3).flat().find(v => !isBlank(v)) || '').toString();
+  const key = Object.keys(AUDITS).find(k => AUDITS[k].detect.test(line));
+  return key ? { key, line } : null;
+}
+
 /* ---------- processing ---------- */
-function processExport(wb) {
+const CALC = {
+  // Second character of the ticket number: P = pawn, B = buy.
+  ticketType: r => { const m = String(r.ticket || '').match(/^\d+([A-Za-z])/); if (!m) return ''; const t = m[1].toUpperCase(); return t === 'P' ? 'Pawn' : t === 'B' ? 'Buy' : t; },
+  daysHeld: (r, ctx) => (r._tdateMs != null && ctx.countMs != null) ? Math.round((ctx.countMs - r._tdateMs) / 86400000) : null,
+};
+
+function processExport(wb, audit, countDate) {
   const warnings = [];   // {level:'warn'|'info', text, items?}
   const out = {};
-  const comKey = norm(CONFIG.commissaryCategory);
-  let blankCat = 0;
-  const miscatItems = [];
+  const ctx = { countMs: dateMs(countDate) };
+  const ticketDigits = {};
+  let skipped = 0;
 
   const sourceRows = {};
-  for (const [skey, src] of Object.entries(CONFIG.sources)) {
+  for (const [skey, src] of Object.entries(audit.sources)) {
+    const cols = columnsFor(audit, skey);
     const { headers, rows } = readTable(wb, src.tab, src.required);
     const get = (row, h) => { const i = headers[norm(h)]; return i == null ? '' : row[i]; };
 
-    let recs = rows.map(r => {
-      const rec = { _cat: cleanText(get(r, 'Category 1')) };
-      for (const c of CONFIG.columns) {
-        if (c.only && c.only !== skey) continue;
+    let recs = [];
+    for (const r of rows) {
+      // Skip leftover rows with no item on them (PawnMate sometimes adds rows holding only "View Image").
+      if (isBlank(get(r, 'Scanned ID')) && isBlank(get(r, 'Description'))) { skipped++; continue; }
+      const tdText = datePart(get(r, 'Ticket Date'));
+      const rec = {
+        _cat: cleanText(get(r, 'Category 1')),
+        _state: cleanText(get(r, 'Inventory State')),
+        _tdateMs: dateMs(tdText),
+        _excluded: false, _note: '',
+      };
+      for (const c of cols) {
         if (!c.src) continue;
         const raw = get(r, c.src);
-        rec[c.key] = c.type === 'id' ? toId(raw) : c.type === 'num' ? toNum(raw) : cleanText(raw);
+        rec[c.key] = c.type === 'id' ? toId(raw) : c.type === 'num' ? toNum(raw) : c.type === 'date' ? tdText : cleanText(raw);
       }
+      if (rec.ticket === undefined) rec.ticket = cleanText(get(r, 'Ticket ID'));
+      for (const c of cols) if (c.calc) rec[c.key] = CALC[c.calc](rec, ctx);
       rec.excog = round2((rec.cog || 0) * (rec.diff || 0));
-      return rec;
-    });
+      const digit = (rec.ticket.match(/^(\d)/) || [])[1];
+      if (digit) ticketDigits[digit] = (ticketDigits[digit] || 0) + 1;
+      recs.push(rec);
+    }
     const sourceCount = recs.length;
+
+    // Scans per Scanned ID, before duplicates are removed.
+    const scans = {};
+    recs.forEach(r => { const k = String(r.id); scans[k] = (scans[k] || 0) + 1; });
+    recs.forEach(r => { r._scans = scans[String(r.id)]; });
 
     if (src.dedupe) {
       const first = new Map(), conflicts = new Map(), kept = [];
@@ -255,26 +404,45 @@ function processExport(wb) {
         } else { dropped++; dupIds.add(k); }
       }
       recs = kept;
-      if (dropped) warnings.push({ level: 'info', text: `${src.tab}: ${sourceCount.toLocaleString()} rows became ${recs.length.toLocaleString()} after removing ${dropped} repeat scan${dropped === 1 ? '' : 's'} of ${dupIds.size} item${dupIds.size === 1 ? '' : 's'}.` });
+      if (dropped) warnings.push({ level: 'info', text: `${src.tab}: ${sourceCount.toLocaleString()} rows became ${recs.length.toLocaleString()} after removing ${plural(dropped, 'repeat scan', 'repeat scans')} of ${plural(dupIds.size, 'item', 'items')}.` });
       if (conflicts.size) warnings.push({
         level: 'warn',
         text: `${conflicts.size} Scanned ID${conflicts.size === 1 ? ' was' : 's were'} scanned more than once with different Difference values. All rows were kept; check these before the recount:`,
         items: [...conflicts.entries()].map(([k, list]) => `${k} — ${list[0].desc} (Diff: ${list.map(x => x.diff).join(', ')})`),
       });
     }
-    sourceRows[skey] = recs;
-    blankCat += recs.filter(r => r._cat === '').length;
-  }
 
-  for (const rep of CONFIG.reports) {
-    const rows = sourceRows[rep.source]
-      .filter(r => (norm(r._cat) === comKey) === rep.commissary)
-      .slice()
-      .sort((a, b) => a.excog - b.excog);          // biggest loss first (stable)
+    // Automatic notes.
+    for (const fkey of audit.flags) {
+      const flag = FLAGS[fkey];
+      if (!flag.sources.includes(skey)) continue;
+      const hit = recs.filter(r => !r._note && flag.test(r, ctx));
+      hit.forEach(r => { r._note = flag.note; if (flag.excludeFromTotals) r._excluded = true; });
+      if (hit.length) warnings.push({ level: 'info', text: `${src.tab}: ${flag.warn(hit.length)}`, items: hit.map(r => `${r.id} — ${r.desc}`) });
+    }
+    sourceRows[skey] = recs;
+  }
+  if (skipped) warnings.push({ level: 'info', text: `${plural(skipped, 'row', 'rows')} with no Scanned ID or description ${skipped === 1 ? 'was' : 'were'} skipped.` });
+
+  const split = audit.splitCategory ? norm(audit.splitCategory) : null;
+  const miscatItems = [];
+  for (const rep of audit.reports) {
+    let rows = sourceRows[rep.source];
+    if (split && rep.split) rows = rows.filter(r => (norm(r._cat) === split) === (rep.split === 'match'));
+    const order = rep.sort === 'cost'
+      ? (a, b) => (b.cog || 0) - (a.cog || 0)          // highest cost first
+      : (a, b) => a.excog - b.excog;                     // biggest loss first
+    rows = rows.slice().sort((a, b) => (a._excluded - b._excluded) || order(a, b));   // stable
     rows.forEach(r => { r._negSys = (r.sys || 0) < 0; r._zeroCost = !r.cog; });
-    const shortage = round2(rows.reduce((s, r) => s + (r.excog < 0 ? r.excog : 0), 0));
-    const overage = round2(rows.reduce((s, r) => s + (r.excog > 0 ? r.excog : 0), 0));
-    out[rep.key] = { rep, rows, shortage, overage, net: round2(shortage + overage) };
+    const counted = rows.filter(r => !r._excluded);
+    const flagged = rows.length - counted.length;
+    if (rep.totals === 'cost') {
+      out[rep.key] = { rep, rows, kind: 'cost', cost: round2(counted.reduce((s, r) => s + (r.cog || 0), 0)), flagged };
+    } else {
+      const shortage = round2(counted.reduce((s, r) => s + (r.excog < 0 ? r.excog : 0), 0));
+      const overage = round2(counted.reduce((s, r) => s + (r.excog > 0 ? r.excog : 0), 0));
+      out[rep.key] = { rep, rows, kind: 'loss', shortage, overage, net: round2(shortage + overage), flagged };
+    }
 
     const neg = rows.filter(r => r._negSys);
     if (neg.length) warnings.push({
@@ -283,25 +451,36 @@ function processExport(wb) {
       items: neg.map(r => `${r.id} — ${r.desc} (Sys ${r.sys}, ExCOG ${money(r.excog)})`),
     });
     const zc = rows.filter(r => r._zeroCost).length;
-    if (zc) warnings.push({ level: 'warn', text: `${rep.sheet}: ${zc} row${zc === 1 ? ' has' : 's have'} a $0 or blank cost, so ExCOG shows $0.00. The COG cell is shaded orange: the dollar impact is unknown, not zero.` });
-    if (!rep.commissary) {
-      rows.filter(r => /\bcommissary\b/i.test(r.desc)).forEach(r => miscatItems.push(`${rep.sheet}: ${r.id} — ${r.desc} (Category 1: ${r._cat || 'blank'})`));
+    if (zc) warnings.push({ level: 'warn', text: rep.totals === 'cost'
+      ? `${rep.sheet}: ${zc} row${zc === 1 ? ' has' : 's have'} a $0 or blank cost. The COG cell is shaded orange: the dollar value is unknown, not zero.`
+      : `${rep.sheet}: ${zc} row${zc === 1 ? ' has' : 's have'} a $0 or blank cost, so ExCOG shows $0.00. The COG cell is shaded orange: the dollar impact is unknown, not zero.` });
+    if (split && rep.split === 'other') {
+      rows.filter(r => new RegExp('\\b' + audit.splitCategory + '\\b', 'i').test(r.desc)).forEach(r => miscatItems.push(`${rep.sheet}: ${r.id} — ${r.desc} (Category 1: ${r._cat || 'blank'})`));
     }
   }
 
-  if (blankCat) warnings.push({ level: 'warn', text: `${blankCat} row${blankCat === 1 ? ' has' : 's have'} a blank Category 1 and ${blankCat === 1 ? 'was' : 'were'} placed on the Regular reports.` });
-  if (miscatItems.length) warnings.push({
-    level: 'info',
-    text: `${miscatItems.length} item${miscatItems.length === 1 ? '' : 's'} on Regular ${miscatItems.length === 1 ? 'has' : 'have'} "Commissary" in the description but not as Category 1. The split uses Category 1 only, so consider re-categorizing ${miscatItems.length === 1 ? 'it' : 'these'} in PawnMate:`,
-    items: miscatItems,
-  });
-  return { reports: out, warnings };
+  if (split) {
+    const blankCat = Object.values(sourceRows).flat().filter(r => r._cat === '').length;
+    if (blankCat) warnings.push({ level: 'warn', text: `${blankCat} row${blankCat === 1 ? ' has' : 's have'} a blank Category 1 and ${blankCat === 1 ? 'was' : 'were'} placed on the Regular reports.` });
+    if (miscatItems.length) warnings.push({
+      level: 'info',
+      text: `${miscatItems.length} item${miscatItems.length === 1 ? '' : 's'} on Regular ${miscatItems.length === 1 ? 'has' : 'have'} "${audit.splitCategory}" in the description but not as Category 1. The split uses Category 1 only, so consider re-categorizing ${miscatItems.length === 1 ? 'it' : 'these'} in PawnMate:`,
+      items: miscatItems,
+    });
+  }
+
+  // Most common first digit of the ticket numbers (appears to be the store number).
+  const total = Object.values(ticketDigits).reduce((a, b) => a + b, 0);
+  const top = Object.entries(ticketDigits).sort((a, b) => b[1] - a[1])[0];
+  const ticketStore = top && top[1] / total > 0.5 ? top[0] : null;
+
+  return { reports: out, warnings, ticketStore };
 }
 
 /* ---------- writing the audit workbook ---------- */
 function estimateLines(text, width) {
   if (!text) return 1;
-  const per = Math.max(1, Math.floor(width * CONFIG.style.charsPerWidthUnit));
+  const per = Math.max(1, Math.floor(width * SHARED.style.charsPerWidthUnit));
   let lines = 1, cur = 0;
   for (const w of String(text).split(/\s+/)) {
     let len = w.length;
@@ -314,21 +493,21 @@ function estimateLines(text, width) {
 
 function fill(hex) { return { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + hex } }; }
 
-async function buildWorkbook(result, meta) {
-  const S = CONFIG.style, P = CONFIG.print;
+async function buildWorkbook(audit, result, meta) {
+  const S = SHARED.style, P = SHARED.print;
   const wb = new ExcelJS.Workbook();
   const now = meta.generatedAt;
   wb.creator = `${APP.name} v${APP.version}`;
   wb.lastModifiedBy = wb.creator;
   wb.created = now; wb.modified = now;
   wb.title = meta.fileName.replace(/\.xlsx$/i, '');
-  wb.subject = `${meta.store} inventory audit, count date ${meta.countDate}`;
-  wb.description = `${APP.name} v${APP.version} | Source: ${meta.sourceName} | Generated: ${meta.generatedText}`;
-  wb.keywords = 'inventory audit PawnMate';
+  wb.subject = `${meta.store} ${audit.label.toLowerCase()}, count date ${meta.countDate}`;
+  wb.description = `${APP.name} v${APP.version} | ${audit.label} | Source: ${meta.sourceName} | Generated: ${meta.generatedText}`;
+  wb.keywords = `${audit.label.toLowerCase()} PawnMate`;
 
-  for (const rep of CONFIG.reports) {
+  for (const rep of audit.reports) {
     const { rows } = result.reports[rep.key];
-    const cols = CONFIG.columns.filter(c => !c.only || c.only === rep.source);
+    const cols = columnsFor(audit, rep.source);
     const addr = {}; cols.forEach((c, i) => addr[c.key] = colLetter(i));
     const ws = wb.addWorksheet(rep.sheet, {
       views: [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', activeCell: 'A2' }],
@@ -336,16 +515,18 @@ async function buildWorkbook(result, meta) {
     });
     ws.columns = cols.map(c => ({ key: c.key, width: c.width, style: { font: { ...S.font } } }));
 
-    // Write the report as an Excel table: the table style supplies the header,
-    // banding, borders and filter buttons. An Excel table needs at least one
+    // Write the report as an Excel table: the table style supplies the header
+    // fill, banding and filter buttons. An Excel table needs at least one
     // data row, so an empty report gets a single "No items" row.
     const values = rows.length
       ? rows.map((r, ri) => cols.map(c => {
           if (c.type === 'excog') {
             const rn = ri + 2;
-            return { formula: CONFIG.excogFormula.replace('{diff}', addr.diff + rn).replace('{cog}', addr.cog + rn), result: r.excog };
+            return { formula: EXCOG_FORMULA.replace('{diff}', addr.diff + rn).replace('{cog}', addr.cog + rn), result: r.excog };
           }
+          if (c.key === 'notes') return r._note || null;
           if (c.type === 'blank') return null;
+          if (c.type === 'date') { const ms = dateMs(r[c.key]); return ms == null ? null : new Date(ms); }
           const v = r[c.key];
           return (v === null || v === undefined || v === '') ? null : v;
         }))
@@ -368,7 +549,8 @@ async function buildWorkbook(result, meta) {
     cols.forEach((c, i) => {
       const cell = hr.getCell(i + 1);
       cell.font = { ...S.font, bold: true, color: { argb: 'FF' + S.headerFontColor } };
-      cell.alignment = { wrapText: true, vertical: 'middle', horizontal: c.align || (c.type === 'num' || c.type === 'excog' ? 'right' : 'left') };
+      cell.fill = fill(S.headerFill);
+      cell.alignment = { wrapText: true, vertical: 'middle', horizontal: c.align || (c.type === 'num' || c.type === 'excog' || c.type === 'date' ? 'right' : 'left') };
       cell.border = box;
     });
     hr.height = S.headerHeight;
@@ -386,7 +568,7 @@ async function buildWorkbook(result, meta) {
         const cell = row.getCell(ci + 1);
         if (c.type === 'id' && typeof r[c.key] === 'string') cell.numFmt = '@';
         else if (c.numFmt) cell.numFmt = c.numFmt;
-        cell.font = { ...S.font };
+        cell.font = (c.key === 'notes' && r._note) ? { ...S.font, italic: true, color: { argb: 'FF' + S.noteFontColor } } : { ...S.font };
         cell.border = box;
         cell.alignment = {
           vertical: 'top',
@@ -419,7 +601,8 @@ async function buildWorkbook(result, meta) {
 }
 
 /* ---------- UI ---------- */
-const state = { saver: null, store: null, file: null, wb: null, result: null, countDate: null, selected: 'regDisc' };
+const state = { saver: null, auditKey: null, store: null, file: null, result: null, countDate: null, selected: null };
+const currentAudit = () => AUDITS[state.auditKey];
 
 function $(id) { return document.getElementById(id); }
 
@@ -430,12 +613,21 @@ function fmtGenerated(d) {
 function outFileName() {
   if (!state.store || !state.countDate) return '';
   const [m, d, y] = state.countDate.split('/');
-  return CONFIG.fileName.replace('{store}', state.store).replace('{date}', `${m}-${d}-${y.slice(2)}`);
+  return currentAudit().fileName.replace('{store}', state.store).replace('{date}', `${m}-${d}-${y.slice(2)}`);
+}
+
+function renderHome() {
+  $('choices').innerHTML = Object.entries(AUDITS).map(([key, a]) => `
+    <a class="choice" href="#${key}">
+      <span class="choice-title">${esc(a.label)}</span>
+      <span class="choice-blurb">${esc(a.blurb)}</span>
+      <span class="choice-tabs">${a.reports.map(r => esc(r.sheet)).join(' · ')}</span>
+    </a>`).join('');
 }
 
 function renderStores() {
   const box = $('stores');
-  box.innerHTML = CONFIG.stores.map(s => `<button type="button" class="seg" role="radio" aria-checked="${s === state.store}" data-store="${s}">${s}</button>`).join('');
+  box.innerHTML = SHARED.stores.map(s => `<button type="button" class="seg" role="radio" aria-checked="${s === state.store}" data-store="${s}">${s}</button>`).join('');
   box.querySelectorAll('button').forEach(b => b.onclick = () => {
     state.store = b.dataset.store; storage.set('iaf.store', state.store); renderStores(); renderAll();
   });
@@ -445,51 +637,75 @@ function showError(msg) {
   $('error').textContent = msg; $('error').hidden = !msg;
 }
 
+function storeWarning() {
+  const r = state.result;
+  if (!r || !r.ticketStore || !state.store) return null;
+  const picked = (state.store.match(/\d+/) || [])[0];
+  if (!picked || picked === r.ticketStore) return null;
+  return { level: 'warn', text: `Most ticket numbers in this file start with ${r.ticketStore}, which usually means it came from BBP${r.ticketStore}. You picked ${state.store}. Check the store before downloading.` };
+}
+
 function renderAll() {
+  const audit = currentAudit();
+  if (!audit) return;
   const r = state.result;
   $('results').hidden = !r;
-  const name = outFileName();
   const btn = $('download');
   btn.disabled = !(r && state.store);
-  $('dlhint').textContent = !r ? '' : !state.store ? 'Pick the store above to name the workbook.' : name;
+  $('dlhint').textContent = !r ? '' : !state.store ? 'Pick the store above to name the workbook.' : outFileName();
   if (!r) return;
 
   $('meta').innerHTML = `<strong>${esc(state.file.name)}</strong> &middot; count date ${esc(state.countDate || 'unknown')}`;
 
-  $('cards').innerHTML = CONFIG.reports.map(rep => {
+  $('cards').style.setProperty('--n', audit.reports.length);
+  $('cards').innerHTML = audit.reports.map(rep => {
     const x = r.reports[rep.key];
+    const flaggedLine = x.flagged ? `<dt>Flagged</dt><dd class="muted">${x.flagged} not in totals</dd>` : '';
+    const body = x.kind === 'cost'
+      ? `<dt>Items</dt><dd>${x.rows.length - x.flagged}</dd>${flaggedLine}<dt class="net">Cost</dt><dd class="net">${money(x.cost)}</dd>`
+      : `<dt>Shortage</dt><dd class="neg">${money(x.shortage)}</dd>
+         <dt>Overage</dt><dd class="pos">${money(x.overage)}</dd>${flaggedLine}
+         <dt class="net">Net</dt><dd class="net ${x.net < 0 ? 'neg' : ''}">${money(x.net)}</dd>`;
     return `<button type="button" class="card ${state.selected === rep.key ? 'sel' : ''}" data-key="${rep.key}">
       <div class="card-h"><span>${esc(rep.sheet)}</span><span class="lines">${x.rows.length} line${x.rows.length === 1 ? '' : 's'}</span></div>
-      <dl>
-        <dt>Shortage</dt><dd class="neg">${money(x.shortage)}</dd>
-        <dt>Overage</dt><dd class="pos">${money(x.overage)}</dd>
-        <dt class="net">Net</dt><dd class="net ${x.net < 0 ? 'neg' : ''}">${money(x.net)}</dd>
-      </dl></button>`;
+      <dl>${body}</dl></button>`;
   }).join('');
   $('cards').querySelectorAll('.card').forEach(c => c.onclick = () => { state.selected = c.dataset.key; renderAll(); });
 
-  const w = r.warnings;
+  const sw = storeWarning();
+  const w = sw ? [sw, ...r.warnings] : r.warnings;
   $('warnings').innerHTML = w.length ? w.map(x => `<li class="${x.level}"><span>${esc(x.text)}</span>${x.items ? `<details><summary>Show ${x.items.length}</summary><ul>${x.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></details>` : ''}</li>`).join('') : '<li class="ok">No warnings.</li>';
 
   // Row preview for the selected report
   const x = r.reports[state.selected];
-  const cols = CONFIG.columns.filter(c => (!c.only || c.only === x.rep.source) && c.type !== 'blank');
-  $('preview-title').textContent = `${x.rep.sheet} — ${x.rows.length} line${x.rows.length === 1 ? '' : 's'}, biggest loss first`;
-  const numCls = c => (c.type === 'num' || c.type === 'excog') ? ' class="n"' : '';
-  const fmt = (c, v) => v == null || v === '' ? '' : c.type === 'excog' || c.numFmt === '0.00' ? Number(v).toFixed(2) : String(v);
-  $('preview').innerHTML = `<thead><tr>${cols.map(c => `<th${numCls(c)}>${esc(c.head)}</th>`).join('')}</tr></thead><tbody>${
-    x.rows.length ? x.rows.map(row => `<tr class="${row._negSys ? 'negsys' : ''}">${cols.map(c => {
-      const v = c.type === 'excog' ? row.excog : row[c.key];
-      const cls = [c.type === 'num' || c.type === 'excog' ? 'n' : '', c.type === 'excog' && v < 0 ? 'neg' : '', c.key === 'cog' && row._zeroCost ? 'zc' : ''].filter(Boolean).join(' ');
+  const cols = columnsFor(audit, x.rep.source).filter(c => c.type !== 'blank' || c.key === 'notes');
+  $('preview-title').textContent = `${x.rep.sheet} — ${x.rows.length} line${x.rows.length === 1 ? '' : 's'}, ${x.rep.sort === 'cost' ? 'highest cost first' : 'biggest loss first'}`;
+  const isNum = c => c.type === 'num' || c.type === 'excog';
+  const fmt = (c, v) => {
+    if (v == null || v === '') return '';
+    if (c.type === 'excog' || c.numFmt === '0.00') return Number(v).toFixed(2);
+    if (c.type === 'date') { const [m, d, y] = v.split('/'); return `${m}/${d}/${y.slice(2)}`; }
+    return String(v);
+  };
+  $('preview').innerHTML = `<thead><tr>${cols.map(c => `<th${isNum(c) ? ' class="n"' : ''}>${esc(c.head)}</th>`).join('')}</tr></thead><tbody>${
+    x.rows.length ? x.rows.map(row => `<tr class="${row._negSys ? 'negsys' : ''}${row._excluded ? ' excluded' : ''}">${cols.map(c => {
+      const v = c.type === 'excog' ? row.excog : c.key === 'notes' ? row._note : row[c.key];
+      const cls = [isNum(c) ? 'n' : '', c.type === 'excog' && v < 0 ? 'neg' : '', c.key === 'cog' && row._zeroCost ? 'zc' : '', c.key === 'notes' ? 'note' : ''].filter(Boolean).join(' ');
       return `<td${cls ? ` class="${cls}"` : ''}>${esc(fmt(c, v))}</td>`;
-    }).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}"><em>${esc(CONFIG.style.emptyText)}</em></td></tr>`
+    }).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}"><em>${esc(SHARED.style.emptyText)}</em></td></tr>`
   }</tbody>`;
 }
 
+function resetFile() {
+  state.file = null; state.result = null; state.countDate = null;
+  const input = $('file'); if (input) input.value = '';
+  showError(''); dlMsg('');
+}
+
 async function handleFile(file) {
-  showError('');
-  state.file = null; state.result = null; renderAll();
-  if (!file) return;
+  const audit = currentAudit();
+  resetFile(); renderAll();
+  if (!file || !audit) return;
   if (!/\.(xls|xlsx)$/i.test(file.name)) { showError(`"${file.name}" isn't an Excel file. Drop the PawnMate .xls export.`); return; }
   $('drop').classList.add('busy');
   try {
@@ -497,13 +713,22 @@ async function handleFile(file) {
     let wb;
     try { wb = XLSX.read(buf, { type: 'array', cellDates: false }); }
     catch (e) { throw new UserError(`Couldn't open "${file.name}" as an Excel file. It may be damaged or still open in another program.`); }
-    const result = processExport(wb);
-    state.file = file; state.wb = wb; state.result = result;
-    state.countDate = findCountDate(wb);
-    if (!state.countDate) {
-      const d = new Date(); state.countDate = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
-      result.warnings.unshift({ level: 'warn', text: `No scan dates were found in the file, so today's date (${state.countDate}) is used as the count date.` });
+    const found = detectAudit(wb);
+    if (found && found.key !== state.auditKey) {
+      const kind = a => a.label.replace(' Audit', '').toLowerCase();
+      const an = w => (/^[aeiou]/.test(w) ? 'an ' : 'a ') + w;
+      throw new UserError(`This looks like ${an(kind(AUDITS[found.key]))} count, not ${an(kind(audit))} count. Its "${DETECT_TAB}" tab says: "${found.line}". Go back and choose ${AUDITS[found.key].label}.`);
     }
+    const warnings = [];
+    let countDate = findCountDate(wb, audit);
+    if (!countDate) {
+      const d = new Date(); countDate = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+      warnings.push({ level: 'warn', text: `No scan dates were found in the file, so today's date (${countDate}) is used as the count date.` });
+    }
+    const result = processExport(wb, audit, countDate);
+    result.warnings.unshift(...warnings);
+    state.file = file; state.result = result; state.countDate = countDate;
+    state.selected = audit.reports[0].key;
     renderAll();
   } catch (e) {
     console.error(e);
@@ -511,17 +736,18 @@ async function handleFile(file) {
   } finally { $('drop').classList.remove('busy'); }
 }
 
-function dlMsg(text, bad) { const m = $('dlmsg'); m.textContent = text || ''; m.className = bad ? 'bad' : ''; }
+function dlMsg(text, bad) { const m = $('dlmsg'); if (!m) return; m.textContent = text || ''; m.className = bad ? 'bad' : ''; }
 
 // Hosted on claude.ai: files are saved through the platform's download prompt.
-// Opened as a local file: window.claude doesn't exist, so a plain download is used.
+// Opened as a local file or a normal website: window.claude doesn't exist, so a plain download is used.
 function getSaver() {
   if (!window.claude || typeof window.claude.use !== 'function') return Promise.resolve(undefined);
   return window.claude.use('downloads').catch(() => null);
 }
 
 async function download() {
-  if (!state.result || !state.store) return;
+  const audit = currentAudit();
+  if (!audit || !state.result || !state.store) return;
   dlMsg('');
   const btn = $('download'); btn.disabled = true; const label = btn.textContent; btn.textContent = 'Building…';
   try {
@@ -530,18 +756,17 @@ async function download() {
       store: state.store, countDate: state.countDate, fileName: outFileName(), sourceName: state.file.name,
       generatedAt: now, generatedShort: fmtGenerated(now), generatedText: now.toLocaleString('en-US'),
     };
-    const buf = await buildWorkbook(state.result, meta);
+    const buf = await buildWorkbook(audit, state.result, meta);
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const saver = await state.saver;
     if (saver === undefined) {
-      // Opened as a local file: a normal browser download.
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = meta.fileName;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 10000);
       dlMsg(`Saved ${meta.fileName} to your Downloads folder.`);
     } else if (saver === null) {
-      dlMsg('Saving files isn\u2019t available in this view. Open the page in a web browser and try again.', true);
+      dlMsg('Saving files isn’t available in this view. Open the page in a web browser and try again.', true);
     } else {
       try {
         await saver.save({ filename: meta.fileName, data: blob });
@@ -558,11 +783,32 @@ async function download() {
   } finally { btn.textContent = label; btn.disabled = false; }
 }
 
+// #inventory, #pawn or #layaway opens that audit; no hash shows the landing page.
+function route() {
+  const key = location.hash.replace(/^#/, '');
+  const next = AUDITS[key] ? key : null;
+  if (next !== state.auditKey) { state.auditKey = next; resetFile(); }
+  $('home').hidden = !!next;
+  $('audit').hidden = !next;
+  if (next) {
+    const a = AUDITS[next];
+    $('audit-title').textContent = a.label;
+    $('audit-blurb').textContent = a.blurb;
+    $('drop-label').textContent = `Drop ${a.fileHint} here`;
+    document.title = `${a.label} · Audit Report Formatter`;
+    renderAll();
+  } else {
+    document.title = 'Audit Report Formatter';
+  }
+  window.scrollTo(0, 0);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   state.saver = getSaver();
   const saved = storage.get('iaf.store');
-  if (CONFIG.stores.includes(saved)) state.store = saved;
+  if (SHARED.stores.includes(saved)) state.store = saved;
   $('ver').textContent = `v${APP.version}`;
+  renderHome();
   renderStores();
   const drop = $('drop'), input = $('file');
   input.onchange = () => handleFile(input.files[0]);
@@ -573,7 +819,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('dragover', e => e.preventDefault());
   window.addEventListener('drop', e => e.preventDefault());
   $('download').onclick = download;
-  renderAll();
+  window.addEventListener('hashchange', route);
+  route();
 });
 </script>
 <style>
@@ -631,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
   #error { background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-ink); border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; }
   #meta { color: var(--muted); margin-bottom: 12px; overflow-wrap: anywhere; }
   #meta strong { color: var(--ink); }
-  #cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  #cards { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 12px; }
   @media (max-width: 860px) { #cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 460px) { #cards { grid-template-columns: 1fr; } }
   .card { text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; cursor: pointer; }
@@ -669,51 +916,84 @@ document.addEventListener('DOMContentLoaded', () => {
   .legend { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
   .legend span { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin: 0 4px 0 10px; border: 1px solid var(--line); }
   .legend .sw-neg { background: var(--hl-neg); } .legend .sw-zero { background: var(--hl-zero); }
+  header h1 a { color: inherit; text-decoration: none; }
+  .intro p { margin: 0 0 14px; color: var(--muted); max-width: 65ch; }
+  .choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 760px) { .choices { grid-template-columns: 1fr; } }
+  .choice { display: flex; flex-direction: column; gap: 6px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; min-width: 0; }
+  .choice:hover { border-color: var(--accent); background: var(--hover); }
+  .choice:focus-visible, .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .choice-title { font-size: 17px; font-weight: 600; }
+  .choice-blurb { color: var(--muted); }
+  .choice-tabs { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; margin-top: auto; }
+  .audit-head { margin-bottom: 16px; }
+  .back { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .back:hover { text-decoration: underline; }
+  .page-title { font-size: 20px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 8px 0 2px; }
+  #audit-blurb { margin: 0; color: var(--muted); }
+  .card dd.muted { color: var(--muted); }
+  tr.excluded td { color: var(--muted); }
+  td.note { font-style: italic; color: var(--muted); white-space: nowrap; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding-block: 0 24px; }
 </style>
 <!--HOSTED_CUT_START--></head>
 <body><!--HOSTED_CUT_END-->
-<header class="gutter"><div class="wrap"><h1>Inventory Audit Report Formatter</h1><small id="ver"></small></div></header>
+<header class="gutter"><div class="wrap"><h1><a href="#">Audit Report Formatter</a></h1><small id="ver"></small></div></header>
 <main class="gutter"><div class="wrap">
-  <section>
-    <div class="step">
-      <div>
-        <h2>1. Store</h2>
-        <div id="stores" role="radiogroup" aria-label="Store"></div>
-      </div>
-      <div>
-        <h2>2. PawnMate export</h2>
-        <label id="drop" for="file">
-          <strong>Drop inventory_count_###.xls here</strong>
-          <span>or click to browse</span>
-          <input id="file" type="file" accept=".xls,.xlsx,application/vnd.ms-excel">
-        </label>
-      </div>
+  <div id="home">
+    <section class="intro">
+      <h2>Choose an audit</h2>
+      <p>Pick the count you're running. Each audit takes the PawnMate count export (inventory_count_###.xls) and builds its own print-ready workbook.</p>
+      <div id="choices" class="choices"></div>
+    </section>
+  </div>
+
+  <div id="audit" hidden>
+    <div class="audit-head">
+      <a class="back" href="#">&larr; All audits</a>
+      <h2 class="page-title" id="audit-title"></h2>
+      <p id="audit-blurb"></p>
     </div>
-  </section>
-
-  <div id="error" role="alert" hidden></div>
-
-  <div id="results" hidden>
     <section>
-      <h2>3. Reports</h2>
-      <div id="meta"></div>
-      <div id="cards"></div>
-      <div class="dl">
-        <button id="download" type="button" disabled>Download workbook</button>
-        <span id="dlhint"></span>
-        <span id="dlmsg" role="status"></span>
+      <div class="step">
+        <div>
+          <h2>1. Store</h2>
+          <div id="stores" role="radiogroup" aria-label="Store"></div>
+        </div>
+        <div>
+          <h2>2. PawnMate export</h2>
+          <label id="drop" for="file">
+            <strong id="drop-label">Drop the count export here</strong>
+            <span>inventory_count_###.xls, or click to browse</span>
+            <input id="file" type="file" accept=".xls,.xlsx,application/vnd.ms-excel">
+          </label>
+        </div>
       </div>
     </section>
-    <section>
-      <h2>Warnings</h2>
-      <ul id="warnings"></ul>
-    </section>
-    <section>
-      <h2 id="preview-title">Preview</h2>
-      <div class="tablewrap"><table id="preview"></table></div>
-      <p class="legend">Click a report above to preview it.<span class="sw-neg"></span>negative System Qty<span class="sw-zero"></span>$0 / blank cost</p>
-    </section>
+
+    <div id="error" role="alert" hidden></div>
+
+    <div id="results" hidden>
+      <section>
+        <h2>3. Reports</h2>
+        <div id="meta"></div>
+        <div id="cards"></div>
+        <div class="dl">
+          <button id="download" type="button" disabled>Download workbook</button>
+          <span id="dlhint"></span>
+          <span id="dlmsg" role="status"></span>
+        </div>
+      </section>
+      <section>
+        <h2>Warnings</h2>
+        <ul id="warnings"></ul>
+      </section>
+      <section>
+        <h2 id="preview-title">Preview</h2>
+        <div class="tablewrap"><table id="preview"></table></div>
+        <p class="legend">Click a report above to preview it.<span class="sw-neg"></span>negative System Qty<span class="sw-zero"></span>$0 / blank cost</p>
+      </section>
+    </div>
   </div>
 </div></main>
 <footer class="gutter">Runs entirely in this browser. No inventory data leaves this computer.</footer>
