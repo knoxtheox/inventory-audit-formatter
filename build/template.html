@@ -16,7 +16,7 @@
    ALL REPORT RULES LIVE IN CONFIG BELOW. To change a column, heading,
    width, format, colour or page-header text, edit CONFIG only.
    ===================================================================== */
-const APP = { name: 'Inventory Audit Report Formatter', version: '1.0.0' };
+const APP = { name: 'Inventory Audit Report Formatter', version: '1.1.0' };
 
 const CONFIG = {
   stores: ['BBP1', 'BBP2', 'BBP3', 'BBP4'],
@@ -80,14 +80,16 @@ const CONFIG = {
 
   style: {
     font: { name: 'Arial', size: 10 },
-    headerFill: '1F3349',       // navy
-    headerFont: 'FFFFFF',       // white
+    // Each tab is an Excel table in this built-in style (header, banding and
+    // borders all come from it). Medium 8 = black header, rows banded gray /
+    // light gray. Any name from Excel's Format as Table gallery works here.
+    tableStyle: 'TableStyleMedium8',
     headerHeight: 27,           // pt (room for two-line headings like "Sys Qty")
     minRowHeight: 18,           // pt (room to write in Found / Notes)
     lineHeight: 12.75,          // pt per wrapped line of Arial 10
     charsPerWidthUnit: 1.0,     // used to estimate wrapped lines (conservative)
     negSysFill: 'FFF2CC',       // light yellow: negative System Qty row
-    zeroCostFill: 'D9D9D9',     // light gray: $0 / blank cost cell
+    zeroCostFill: 'FCE4D6',     // light orange: $0 / blank cost cell (gray would vanish in the banding)
     emptyText: 'No items in this report.',
   },
 
@@ -274,7 +276,7 @@ function processExport(wb) {
       items: neg.map(r => `${r.id} — ${r.desc} (Sys ${r.sys}, ExCOG ${money(r.excog)})`),
     });
     const zc = rows.filter(r => r._zeroCost).length;
-    if (zc) warnings.push({ level: 'warn', text: `${rep.sheet}: ${zc} row${zc === 1 ? ' has' : 's have'} a $0 or blank cost, so ExCOG shows $0.00. The COG cell is shaded gray: the dollar impact is unknown, not zero.` });
+    if (zc) warnings.push({ level: 'warn', text: `${rep.sheet}: ${zc} row${zc === 1 ? ' has' : 's have'} a $0 or blank cost, so ExCOG shows $0.00. The COG cell is shaded orange: the dollar impact is unknown, not zero.` });
     if (!rep.commissary) {
       rows.filter(r => /\bcommissary\b/i.test(r.desc)).forEach(r => miscatItems.push(`${rep.sheet}: ${r.id} — ${r.desc} (Category 1: ${r._cat || 'blank'})`));
     }
@@ -317,8 +319,6 @@ async function buildWorkbook(result, meta) {
   wb.description = `${APP.name} v${APP.version} | Source: ${meta.sourceName} | Generated: ${meta.generatedText}`;
   wb.keywords = 'inventory audit PawnMate';
 
-  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
-
   for (const rep of CONFIG.reports) {
     const { rows } = result.reports[rep.key];
     const cols = CONFIG.columns.filter(c => !c.only || c.only === rep.source);
@@ -329,38 +329,50 @@ async function buildWorkbook(result, meta) {
     });
     ws.columns = cols.map(c => ({ key: c.key, width: c.width, style: { font: { ...S.font } } }));
 
-    // Header row
+    // Write the report as an Excel table: the table style supplies the header,
+    // banding, borders and filter buttons. An Excel table needs at least one
+    // data row, so an empty report gets a single "No items" row.
+    const values = rows.length
+      ? rows.map((r, ri) => cols.map(c => {
+          if (c.type === 'excog') {
+            const rn = ri + 2;
+            return { formula: CONFIG.excogFormula.replace('{diff}', addr.diff + rn).replace('{cog}', addr.cog + rn), result: r.excog };
+          }
+          if (c.type === 'blank') return null;
+          const v = r[c.key];
+          return (v === null || v === undefined || v === '') ? null : v;
+        }))
+      : [cols.map((c, i) => (i === 0 ? S.emptyText : null))];
+    ws.addTable({
+      name: rep.sheet.replace(/[^A-Za-z0-9]/g, ''),
+      ref: 'A1',
+      headerRow: true,
+      totalsRow: false,
+      style: { theme: S.tableStyle, showRowStripes: true, showColumnStripes: false, showFirstColumn: false, showLastColumn: false },
+      columns: cols.map(c => ({ name: c.head, filterButton: true })),
+      rows: values,
+    });
+
+    // Cell formatting on top of the table style. No fills, borders or font
+    // colours here except the two highlights, so the style shows through.
     const hr = ws.getRow(1);
     cols.forEach((c, i) => {
       const cell = hr.getCell(i + 1);
-      cell.value = c.head;
-      cell.font = { ...S.font, bold: true, color: { argb: 'FF' + S.headerFont } };
-      cell.fill = fill(S.headerFill);
+      cell.font = { ...S.font, bold: true };
       cell.alignment = { wrapText: true, vertical: 'middle', horizontal: c.align || (c.type === 'num' || c.type === 'excog' ? 'right' : 'left') };
-      cell.border = { top: thin, left: thin, bottom: thin, right: thin };
     });
     hr.height = S.headerHeight;
 
     if (!rows.length) {
-      const cell = ws.getCell('A2');
-      cell.value = S.emptyText;
-      cell.font = { ...S.font, italic: true };
+      ws.getCell('A2').font = { ...S.font, italic: true };
       ws.getRow(2).height = S.minRowHeight;
     }
 
     rows.forEach((r, ri) => {
-      const rn = ri + 2;
-      const row = ws.getRow(rn);
+      const row = ws.getRow(ri + 2);
       let maxLines = 1;
       cols.forEach((c, ci) => {
         const cell = row.getCell(ci + 1);
-        if (c.type === 'excog') {
-          const f = CONFIG.excogFormula.replace('{diff}', addr.diff + rn).replace('{cog}', addr.cog + rn);
-          cell.value = { formula: f, result: r.excog };
-        } else if (c.type !== 'blank') {
-          const v = r[c.key];
-          cell.value = (v === null || v === undefined || v === '') ? null : v;
-        }
         if (c.type === 'id' && typeof r[c.key] === 'string') cell.numFmt = '@';
         else if (c.numFmt) cell.numFmt = c.numFmt;
         cell.font = { ...S.font };
@@ -369,16 +381,12 @@ async function buildWorkbook(result, meta) {
           wrapText: !!c.wrap,
           horizontal: c.align || (c.type === 'id' ? 'left' : undefined),
         };
-        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
         if (r._negSys) cell.fill = fill(S.negSysFill);
         if (c.key === 'cog' && r._zeroCost) cell.fill = fill(S.zeroCostFill);
         if (c.wrap) maxLines = Math.max(maxLines, estimateLines(cell.value == null ? '' : cell.value, c.width));
       });
       row.height = Math.max(S.minRowHeight, Math.ceil((maxLines * S.lineHeight + 3) * 4) / 4);
     });
-
-    const last = colLetter(cols.length - 1);
-    ws.autoFilter = { from: 'A1', to: `${last}${Math.max(1, rows.length + 1)}` };
 
     ws.pageSetup = {
       orientation: P.orientation, paperSize: P.paperSize,
@@ -564,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
     --neg: #b42318; --pos: #1d7a46;
     --warn-bg: #fff7e0; --warn-line: #e9b949; --info-bg: #edf3fa; --info-line: #8fb0d9; --ok-bg: #ecf7f0; --ok-line: #84c7a0;
     --err-bg: #fdecea; --err-line: #f0b1a9; --err-ink: #8a1c12;
-    --hl-neg: #FFF2CC; --hl-zero: #D9D9D9;
+    --hl-neg: #FFF2CC; --hl-zero: #FCE4D6;
     --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
@@ -573,7 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
     --neg: #ff8a80; --pos: #6fd39a;
     --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #172433; --info-line: #3f6a99; --ok-bg: #13281c; --ok-line: #2f7a4d;
     --err-bg: #3a1714; --err-line: #8a3a32; --err-ink: #ffb4ab;
-    --hl-neg: #4a3f12; --hl-zero: #3a3f46; color-scheme: dark;
+    --hl-neg: #4a3f12; --hl-zero: #4d3427; color-scheme: dark;
   } }
   :root[data-theme="dark"] {
     --bg: #11161d; --panel: #19212b; --ink: #e6eaf0; --muted: #9aa5b4; --line: #2c3744; --dash: #475262; --hover: #1f2935;
@@ -581,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
     --neg: #ff8a80; --pos: #6fd39a;
     --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #172433; --info-line: #3f6a99; --ok-bg: #13281c; --ok-line: #2f7a4d;
     --err-bg: #3a1714; --err-line: #8a3a32; --err-ink: #ffb4ab;
-    --hl-neg: #4a3f12; --hl-zero: #3a3f46; color-scheme: dark;
+    --hl-neg: #4a3f12; --hl-zero: #4d3427; color-scheme: dark;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); }
