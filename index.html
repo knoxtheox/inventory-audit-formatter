@@ -16,7 +16,7 @@
    ALL REPORT RULES LIVE IN CONFIG BELOW. To change a column, heading,
    width, format, colour or page-header text, edit CONFIG only.
    ===================================================================== */
-const APP = { name: 'Inventory Audit Report Formatter', version: '1.1.0' };
+const APP = { name: 'Inventory Audit Report Formatter', version: '1.2.0' };
 
 const CONFIG = {
   stores: ['BBP1', 'BBP2', 'BBP3', 'BBP4'],
@@ -80,11 +80,18 @@ const CONFIG = {
 
   style: {
     font: { name: 'Arial', size: 10 },
-    // Each tab is an Excel table in this built-in style (header, banding and
-    // borders all come from it). Medium 8 = black header, rows banded gray /
-    // light gray. Any name from Excel's Format as Table gallery works here.
-    tableStyle: 'TableStyleMedium8',
-    headerHeight: 27,           // pt (room for two-line headings like "Sys Qty")
+    // Each tab is an Excel table in this built-in style (header fill and row
+    // banding come from it). Medium 1 = black header, rows banded light gray /
+    // white. Any name from Excel's Format as Table gallery works here.
+    tableStyle: 'TableStyleMedium1',
+    // Thin border drawn on every cell, header included, so the grid shows on
+    // screen and on paper whatever borders the table style has.
+    borderColor: '808080',
+    // Header text colour. Must be set explicitly: Excel draws a header cell
+    // whose font has no colour in black, not in the table style's colour.
+    // Use 'FFFFFF' for styles with a dark header, '000000' for a light one.
+    headerFontColor: 'FFFFFF',
+    headerHeight: 27,          // pt (room for two-line headings like "Sys Qty")
     minRowHeight: 18,           // pt (room to write in Found / Notes)
     lineHeight: 12.75,          // pt per wrapped line of Arial 10
     charsPerWidthUnit: 1.0,     // used to estimate wrapped lines (conservative)
@@ -353,17 +360,21 @@ async function buildWorkbook(result, meta) {
       rows: values,
     });
 
-    // Cell formatting on top of the table style. No fills, borders or font
-    // colours here except the two highlights, so the style shows through.
+    // Cell formatting on top of the table style. No fills here except the two
+    // highlights, so the style's header fill and banding show through.
+    const line = { style: 'thin', color: { argb: 'FF' + S.borderColor } };
+    const box = { top: line, left: line, bottom: line, right: line };
     const hr = ws.getRow(1);
     cols.forEach((c, i) => {
       const cell = hr.getCell(i + 1);
-      cell.font = { ...S.font, bold: true };
+      cell.font = { ...S.font, bold: true, color: { argb: 'FF' + S.headerFontColor } };
       cell.alignment = { wrapText: true, vertical: 'middle', horizontal: c.align || (c.type === 'num' || c.type === 'excog' ? 'right' : 'left') };
+      cell.border = box;
     });
     hr.height = S.headerHeight;
 
     if (!rows.length) {
+      cols.forEach((c, i) => { ws.getRow(2).getCell(i + 1).border = box; });
       ws.getCell('A2').font = { ...S.font, italic: true };
       ws.getRow(2).height = S.minRowHeight;
     }
@@ -376,6 +387,7 @@ async function buildWorkbook(result, meta) {
         if (c.type === 'id' && typeof r[c.key] === 'string') cell.numFmt = '@';
         else if (c.numFmt) cell.numFmt = c.numFmt;
         cell.font = { ...S.font };
+        cell.border = box;
         cell.alignment = {
           vertical: 'top',
           wrapText: !!c.wrap,
