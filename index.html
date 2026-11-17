@@ -20,7 +20,7 @@
      AUDITS   one block per audit: source tabs, columns, output tabs
    To change one audit, edit only its block in AUDITS.
    ===================================================================== */
-const APP = { name: 'Audit Report Formatter', version: '2.0.0' };
+const APP = { name: 'Audit Report Formatter', version: '2.1.0' };
 
 const SHARED = {
   stores: ['BBP1', 'BBP2', 'BBP3', 'BBP4'],
@@ -687,10 +687,10 @@ function renderAll() {
     if (c.type === 'date') { const [m, d, y] = v.split('/'); return `${m}/${d}/${y.slice(2)}`; }
     return String(v);
   };
-  $('preview').innerHTML = `<thead><tr>${cols.map(c => `<th${isNum(c) ? ' class="n"' : ''}>${esc(c.head)}</th>`).join('')}</tr></thead><tbody>${
+  $('preview').innerHTML = `<thead><tr>${cols.map(c => `<th class="c-${c.key}${isNum(c) ? ' n' : ''}">${esc(c.head)}</th>`).join('')}</tr></thead><tbody>${
     x.rows.length ? x.rows.map(row => `<tr class="${row._negSys ? 'negsys' : ''}${row._excluded ? ' excluded' : ''}">${cols.map(c => {
       const v = c.type === 'excog' ? row.excog : c.key === 'notes' ? row._note : row[c.key];
-      const cls = [isNum(c) ? 'n' : '', c.type === 'excog' && v < 0 ? 'neg' : '', c.key === 'cog' && row._zeroCost ? 'zc' : '', c.key === 'notes' ? 'note' : ''].filter(Boolean).join(' ');
+      const cls = ['c-' + c.key, isNum(c) ? 'n' : '', c.type === 'excog' && v < 0 ? 'neg' : '', c.key === 'cog' && row._zeroCost ? 'zc' : '', c.key === 'notes' ? 'note' : ''].filter(Boolean).join(' ');
       return `<td${cls ? ` class="${cls}"` : ''}>${esc(fmt(c, v))}</td>`;
     }).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}"><em>${esc(SHARED.style.emptyText)}</em></td></tr>`
   }</tbody>`;
@@ -825,28 +825,29 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <style>
   /* Layout: one centered work column; setup row, then report cards, warnings, row preview. */
+  /* Palette: Big Brothers Pawn red on white. --brand / --accent hold the red. */
   :root {
-    --bg: #f3f5f8; --panel: #ffffff; --ink: #1b2330; --muted: #5a6474; --line: #dce1e8; --dash: #b5bfcc; --hover: #eef2f7;
-    --brand: #1F3349; --brand-ink: #ffffff; --accent: #1F3349; --accent-ink: #ffffff; --disabled: #9aa5b3;
-    --neg: #b42318; --pos: #1d7a46;
-    --warn-bg: #fff7e0; --warn-line: #e9b949; --info-bg: #edf3fa; --info-line: #8fb0d9; --ok-bg: #ecf7f0; --ok-line: #84c7a0;
+    --bg: #ffffff; --panel: #ffffff; --ink: #1f1a1b; --muted: #635b5d; --line: #e6dfe0; --dash: #d8a9b0; --hover: #fdf2f3;
+    --brand: #C8102E; --brand-ink: #ffffff; --accent: #C8102E; --accent-ink: #ffffff; --disabled: #cdbfc1;
+    --neg: #a3162b; --pos: #1d7a46;
+    --warn-bg: #fff7e0; --warn-line: #e9b949; --info-bg: #f4f4f6; --info-line: #a9a9b3; --ok-bg: #ecf7f0; --ok-line: #84c7a0;
     --err-bg: #fdecea; --err-line: #f0b1a9; --err-ink: #8a1c12;
     --hl-neg: #FFF2CC; --hl-zero: #FCE4D6;
     --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-    --bg: #11161d; --panel: #19212b; --ink: #e6eaf0; --muted: #9aa5b4; --line: #2c3744; --dash: #475262; --hover: #1f2935;
-    --brand: #1c2d40; --brand-ink: #f2f5f9; --accent: #4a77a8; --accent-ink: #ffffff; --disabled: #4a5563;
-    --neg: #ff8a80; --pos: #6fd39a;
-    --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #172433; --info-line: #3f6a99; --ok-bg: #13281c; --ok-line: #2f7a4d;
+    --bg: #141011; --panel: #1d1719; --ink: #f1ecec; --muted: #a99fa1; --line: #3a2d30; --dash: #6a3a42; --hover: #2a1c1f;
+    --brand: #a50d26; --brand-ink: #ffffff; --accent: #e0364f; --accent-ink: #ffffff; --disabled: #554649;
+    --neg: #ff8a8a; --pos: #6fd39a;
+    --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #222024; --info-line: #6b6873; --ok-bg: #13281c; --ok-line: #2f7a4d;
     --err-bg: #3a1714; --err-line: #8a3a32; --err-ink: #ffb4ab;
     --hl-neg: #4a3f12; --hl-zero: #4d3427; color-scheme: dark;
   } }
   :root[data-theme="dark"] {
-    --bg: #11161d; --panel: #19212b; --ink: #e6eaf0; --muted: #9aa5b4; --line: #2c3744; --dash: #475262; --hover: #1f2935;
-    --brand: #1c2d40; --brand-ink: #f2f5f9; --accent: #4a77a8; --accent-ink: #ffffff; --disabled: #4a5563;
-    --neg: #ff8a80; --pos: #6fd39a;
-    --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #172433; --info-line: #3f6a99; --ok-bg: #13281c; --ok-line: #2f7a4d;
+    --bg: #141011; --panel: #1d1719; --ink: #f1ecec; --muted: #a99fa1; --line: #3a2d30; --dash: #6a3a42; --hover: #2a1c1f;
+    --brand: #a50d26; --brand-ink: #ffffff; --accent: #e0364f; --accent-ink: #ffffff; --disabled: #554649;
+    --neg: #ff8a8a; --pos: #6fd39a;
+    --warn-bg: #2d2614; --warn-line: #a8862f; --info-bg: #222024; --info-line: #6b6873; --ok-bg: #13281c; --ok-line: #2f7a4d;
     --err-bg: #3a1714; --err-line: #8a3a32; --err-ink: #ffb4ab;
     --hl-neg: #4a3f12; --hl-zero: #4d3427; color-scheme: dark;
   }
@@ -881,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
   #cards { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 12px; }
   @media (max-width: 860px) { #cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 460px) { #cards { grid-template-columns: 1fr; } }
-  .card { text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; cursor: pointer; }
+  .card { display: flex; flex-direction: column; text-align: left; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; cursor: pointer; }
   .card:hover { background: var(--hover); }
   .card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .card-h { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; margin-bottom: 8px; }
@@ -909,7 +910,8 @@ document.addEventListener('DOMContentLoaded', () => {
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   th { position: sticky; top: 0; background: var(--brand); color: var(--brand-ink); text-align: left; font-weight: 600; padding: 6px 8px; white-space: nowrap; }
   td { border-top: 1px solid var(--line); padding: 5px 8px; vertical-align: top; }
-  td:nth-child(2) { min-width: 220px; }
+  td.c-desc { min-width: 260px; }
+  td.c-loc, td.c-ticket, td.c-tdate, td.c-id { white-space: nowrap; }
   th.n, td.n { text-align: right; font-variant-numeric: tabular-nums; }
   tr.negsys td { background: var(--hl-neg); }
   td.zc { background: var(--hl-zero); }
